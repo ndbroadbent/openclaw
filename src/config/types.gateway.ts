@@ -218,6 +218,10 @@ export type GatewayConfig = {
   tls?: GatewayTlsConfig;
   http?: GatewayHttpConfig;
   nodes?: GatewayNodesConfig;
-  /** IP addresses of trusted reverse proxies (e.g. Traefik, nginx). Requests from these IPs are treated as local for pairing auto-approval. */
+  /**
+   * IPs of trusted reverse proxies (e.g. Traefik, nginx). When a connection
+   * arrives from one of these IPs, the Gateway trusts `x-forwarded-for` (or
+   * `x-real-ip`) to determine the client IP for local pairing and HTTP checks.
+   */
   trustedProxies?: string[];
 };

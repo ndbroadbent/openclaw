@@ -29,6 +29,8 @@ Clawdbot is both a product and an experiment: you’re wiring frontier-model beh
 - where the bot is allowed to act
 - what the bot can touch
 
+Start with the smallest access that still works, then widen it as you gain confidence.
+
 ### What the audit checks (high level)
 
 - **Inbound access** (DM policies, group policies, allowlists): can strangers trigger the bot?
@@ -321,6 +323,11 @@ Tailscale.
 **Security rule:** do not forward these headers from your own reverse proxy. If
 you terminate TLS or proxy in front of the gateway, disable
 `gateway.auth.allowTailscale` and use token/password auth instead.
+
+Trusted proxies:
+- If you terminate TLS in front of the Gateway, set `gateway.trustedProxies` to your proxy IPs.
+- Clawdbot will trust `x-forwarded-for` (or `x-real-ip`) from those IPs to determine the client IP for local pairing checks and HTTP auth/local checks.
+- Ensure your proxy **overwrites** `x-forwarded-for` and blocks direct access to the Gateway port.
 
 See [Tailscale](/gateway/tailscale) and [Web overview](/web).
 

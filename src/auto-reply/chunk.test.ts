@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { chunkMarkdownText, chunkText, resolveTextChunkLimit } from "./chunk.js";
+import {
+  chunkByNewline,
+  chunkMarkdownText,
+  chunkMarkdownTextWithMode,
+  chunkText,
+  chunkTextWithMode,
+  resolveChunkMode,
+  resolveTextChunkLimit,
+} from "./chunk.js";
 
 function expectFencesBalanced(chunks: string[]) {
   for (const chunk of chunks) {
@@ -229,5 +237,136 @@ describe("chunkMarkdownText", () => {
     const chunks = chunkMarkdownText(text, 20);
     expect(chunks[0]?.length).toBe(20);
     expect(chunks.join("")).toBe(text);
+  });
+});
+
+describe("chunkByNewline", () => {
+  it("splits text on newlines", () => {
+    const text = "Line one\nLine two\nLine three";
+    const chunks = chunkByNewline(text, 1000);
+    expect(chunks).toEqual(["Line one", "Line two", "Line three"]);
+  });
+
+  it("preserves blank lines by folding into the next chunk", () => {
+    const text = "Line one\n\n\nLine two\n\nLine three";
+    const chunks = chunkByNewline(text, 1000);
+    expect(chunks).toEqual(["Line one", "\n\nLine two", "\nLine three"]);
+  });
+
+  it("trims whitespace from lines", () => {
+    const text = "  Line one  \n  Line two  ";
+    const chunks = chunkByNewline(text, 1000);
+    expect(chunks).toEqual(["Line one", "Line two"]);
+  });
+
+  it("preserves leading blank lines on the first chunk", () => {
+    const text = "\n\nLine one\nLine two";
+    const chunks = chunkByNewline(text, 1000);
+    expect(chunks).toEqual(["\n\nLine one", "Line two"]);
+  });
+
+  it("falls back to length-based for long lines", () => {
+    const text = "Short line\n" + "a".repeat(50) + "\nAnother short";
+    const chunks = chunkByNewline(text, 20);
+    expect(chunks[0]).toBe("Short line");
+    // Long line gets split into multiple chunks
+    expect(chunks[1].length).toBe(20);
+    expect(chunks[2].length).toBe(20);
+    expect(chunks[3].length).toBe(10);
+    expect(chunks[4]).toBe("Another short");
+  });
+
+  it("does not split long lines when splitLongLines is false", () => {
+    const text = "a".repeat(50);
+    const chunks = chunkByNewline(text, 20, { splitLongLines: false });
+    expect(chunks).toEqual([text]);
+  });
+
+  it("returns empty array for empty input", () => {
+    expect(chunkByNewline("", 100)).toEqual([]);
+  });
+
+  it("returns empty array for whitespace-only input", () => {
+    expect(chunkByNewline("   \n\n   ", 100)).toEqual([]);
+  });
+
+  it("preserves trailing blank lines on the last chunk", () => {
+    const text = "Line one\n\n";
+    const chunks = chunkByNewline(text, 1000);
+    expect(chunks).toEqual(["Line one\n\n"]);
+  });
+
+  it("keeps whitespace when trimLines is false", () => {
+    const text = "  indented line  \nNext";
+    const chunks = chunkByNewline(text, 1000, { trimLines: false });
+    expect(chunks).toEqual(["  indented line  ", "Next"]);
+  });
+});
+
+describe("chunkTextWithMode", () => {
+  it("uses length-based chunking for length mode", () => {
+    const text = "Line one\nLine two";
+    const chunks = chunkTextWithMode(text, 1000, "length");
+    expect(chunks).toEqual(["Line one\nLine two"]);
+  });
+
+  it("uses newline-based chunking for newline mode", () => {
+    const text = "Line one\nLine two";
+    const chunks = chunkTextWithMode(text, 1000, "newline");
+    expect(chunks).toEqual(["Line one", "Line two"]);
+  });
+});
+
+describe("chunkMarkdownTextWithMode", () => {
+  it("uses markdown-aware chunking for length mode", () => {
+    const text = "Line one\nLine two";
+    expect(chunkMarkdownTextWithMode(text, 1000, "length")).toEqual(chunkMarkdownText(text, 1000));
+  });
+
+  it("uses newline-based chunking for newline mode", () => {
+    const text = "Line one\nLine two";
+    expect(chunkMarkdownTextWithMode(text, 1000, "newline")).toEqual(["Line one", "Line two"]);
+  });
+
+  it("does not split inside code fences for newline mode", () => {
+    const text = "```js\nconst a = 1;\nconst b = 2;\n```\nAfter";
+    expect(chunkMarkdownTextWithMode(text, 1000, "newline")).toEqual([
+      "```js\nconst a = 1;\nconst b = 2;\n```",
+      "After",
+    ]);
+  });
+});
+
+describe("resolveChunkMode", () => {
+  it("returns length as default", () => {
+    expect(resolveChunkMode(undefined, "telegram")).toBe("length");
+    expect(resolveChunkMode({}, "discord")).toBe("length");
+    expect(resolveChunkMode(undefined, "bluebubbles")).toBe("length");
+  });
+
+  it("returns length for internal channel", () => {
+    const cfg = { channels: { bluebubbles: { chunkMode: "newline" as const } } };
+    expect(resolveChunkMode(cfg, "__internal__")).toBe("length");
+  });
+
+  it("supports provider-level overrides for slack", () => {
+    const cfg = { channels: { slack: { chunkMode: "newline" as const } } };
+    expect(resolveChunkMode(cfg, "slack")).toBe("newline");
+    expect(resolveChunkMode(cfg, "discord")).toBe("length");
+  });
+
+  it("supports account-level overrides for slack", () => {
+    const cfg = {
+      channels: {
+        slack: {
+          chunkMode: "length" as const,
+          accounts: {
+            primary: { chunkMode: "newline" as const },
+          },
+        },
+      },
+    };
+    expect(resolveChunkMode(cfg, "slack", "primary")).toBe("newline");
+    expect(resolveChunkMode(cfg, "slack", "other")).toBe("length");
   });
 });

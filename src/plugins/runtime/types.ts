@@ -35,8 +35,13 @@ type ResolveInboundDebounceMs =
 type ResolveCommandAuthorizedFromAuthorizers =
   typeof import("../../channels/command-gating.js").resolveCommandAuthorizedFromAuthorizers;
 type ResolveTextChunkLimit = typeof import("../../auto-reply/chunk.js").resolveTextChunkLimit;
+type ResolveChunkMode = typeof import("../../auto-reply/chunk.js").resolveChunkMode;
 type ChunkMarkdownText = typeof import("../../auto-reply/chunk.js").chunkMarkdownText;
+type ChunkMarkdownTextWithMode =
+  typeof import("../../auto-reply/chunk.js").chunkMarkdownTextWithMode;
 type ChunkText = typeof import("../../auto-reply/chunk.js").chunkText;
+type ChunkTextWithMode = typeof import("../../auto-reply/chunk.js").chunkTextWithMode;
+type ChunkByNewline = typeof import("../../auto-reply/chunk.js").chunkByNewline;
 type ResolveMarkdownTableMode =
   typeof import("../../config/markdown-tables.js").resolveMarkdownTableMode;
 type ConvertMarkdownTables = typeof import("../../markdown/tables.js").convertMarkdownTables;
@@ -120,6 +125,8 @@ type TelegramMessageActions =
 type ProbeSignal = typeof import("../../signal/probe.js").probeSignal;
 type SendMessageSignal = typeof import("../../signal/send.js").sendMessageSignal;
 type MonitorSignalProvider = typeof import("../../signal/index.js").monitorSignalProvider;
+type SignalMessageActions =
+  typeof import("../../channels/plugins/actions/signal.js").signalMessageActions;
 type MonitorIMessageProvider = typeof import("../../imessage/monitor.js").monitorIMessageProvider;
 type ProbeIMessage = typeof import("../../imessage/probe.js").probeIMessage;
 type SendMessageIMessage = typeof import("../../imessage/send.js").sendMessageIMessage;
@@ -173,8 +180,12 @@ export type PluginRuntime = {
   };
   channel: {
     text: {
+      chunkByNewline: ChunkByNewline;
       chunkMarkdownText: ChunkMarkdownText;
+      chunkMarkdownTextWithMode: ChunkMarkdownTextWithMode;
       chunkText: ChunkText;
+      chunkTextWithMode: ChunkTextWithMode;
+      resolveChunkMode: ResolveChunkMode;
       resolveTextChunkLimit: ResolveTextChunkLimit;
       hasControlCommand: HasControlCommand;
       resolveMarkdownTableMode: ResolveMarkdownTableMode;
@@ -272,6 +283,7 @@ export type PluginRuntime = {
       probeSignal: ProbeSignal;
       sendMessageSignal: SendMessageSignal;
       monitorSignalProvider: MonitorSignalProvider;
+      messageActions: SignalMessageActions;
     };
     imessage: {
       monitorIMessageProvider: MonitorIMessageProvider;

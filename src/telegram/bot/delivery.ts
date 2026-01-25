@@ -4,6 +4,7 @@ import {
   markdownToTelegramHtml,
   renderTelegramHtmlText,
 } from "../format.js";
+import { chunkMarkdownTextWithMode, type ChunkMode } from "../../auto-reply/chunk.js";
 import { splitTelegramCaption } from "../caption.js";
 import type { ReplyPayload } from "../../auto-reply/types.js";
 import type { ReplyToMode } from "../../config/config.js";
@@ -32,12 +33,36 @@ export async function deliverReplies(params: {
   textLimit: number;
   messageThreadId?: number;
   tableMode?: MarkdownTableMode;
+  chunkMode?: ChunkMode;
   /** Callback invoked before sending a voice message to switch typing indicator. */
   onVoiceRecording?: () => Promise<void> | void;
+  /** Controls whether link previews are shown. Default: true (previews enabled). */
+  linkPreview?: boolean;
 }) {
-  const { replies, chatId, runtime, bot, replyToMode, textLimit, messageThreadId } = params;
+  const { replies, chatId, runtime, bot, replyToMode, textLimit, messageThreadId, linkPreview } =
+    params;
+  const chunkMode = params.chunkMode ?? "length";
   const threadParams = buildTelegramThreadParams(messageThreadId);
   let hasReplied = false;
+  const chunkText = (markdown: string) => {
+    const markdownChunks =
+      chunkMode === "newline"
+        ? chunkMarkdownTextWithMode(markdown, textLimit, chunkMode)
+        : [markdown];
+    const chunks: ReturnType<typeof markdownToTelegramChunks> = [];
+    for (const chunk of markdownChunks) {
+      const nested = markdownToTelegramChunks(chunk, textLimit, { tableMode: params.tableMode });
+      if (!nested.length && chunk) {
+        chunks.push({
+          html: markdownToTelegramHtml(chunk, { tableMode: params.tableMode }),
+          text: chunk,
+        });
+        continue;
+      }
+      chunks.push(...nested);
+    }
+    return chunks;
+  };
   for (const reply of replies) {
     const hasMedia = Boolean(reply?.mediaUrl) || (reply?.mediaUrls?.length ?? 0) > 0;
     if (!reply?.text && !hasMedia) {
@@ -55,9 +80,7 @@ export async function deliverReplies(params: {
         ? [reply.mediaUrl]
         : [];
     if (mediaList.length === 0) {
-      const chunks = markdownToTelegramChunks(reply.text || "", textLimit, {
-        tableMode: params.tableMode,
-      });
+      const chunks = chunkText(reply.text || "");
       for (const chunk of chunks) {
         await sendTelegramText(bot, chatId, chunk.html, runtime, {
           replyToMessageId:
@@ -65,6 +88,7 @@ export async function deliverReplies(params: {
           messageThreadId,
           textMode: "html",
           plainText: chunk.text,
+          linkPreview,
         });
         if (replyToId && !hasReplied) {
           hasReplied = true;
@@ -151,9 +175,7 @@ export async function deliverReplies(params: {
       // Send deferred follow-up text right after the first media item.
       // Chunk it in case it's extremely long (same logic as text-only replies).
       if (pendingFollowUpText && isFirstMedia) {
-        const chunks = markdownToTelegramChunks(pendingFollowUpText, textLimit, {
-          tableMode: params.tableMode,
-        });
+        const chunks = chunkText(pendingFollowUpText);
         for (const chunk of chunks) {
           const replyToMessageIdFollowup =
             replyToId && (replyToMode === "all" || !hasReplied) ? replyToId : undefined;
@@ -162,6 +184,7 @@ export async function deliverReplies(params: {
             messageThreadId,
             textMode: "html",
             plainText: chunk.text,
+            linkPreview,
           });
           if (replyToId && !hasReplied) {
             hasReplied = true;
@@ -230,17 +253,22 @@ async function sendTelegramText(
     messageThreadId?: number;
     textMode?: "markdown" | "html";
     plainText?: string;
+    linkPreview?: boolean;
   },
 ): Promise<number | undefined> {
   const baseParams = buildTelegramSendParams({
     replyToMessageId: opts?.replyToMessageId,
     messageThreadId: opts?.messageThreadId,
   });
+  // Add link_preview_options when link preview is disabled.
+  const linkPreviewEnabled = opts?.linkPreview ?? true;
+  const linkPreviewOptions = linkPreviewEnabled ? undefined : { is_disabled: true };
   const textMode = opts?.textMode ?? "markdown";
   const htmlText = textMode === "html" ? text : markdownToTelegramHtml(text);
   try {
     const res = await bot.api.sendMessage(chatId, htmlText, {
       parse_mode: "HTML",
+      ...(linkPreviewOptions ? { link_preview_options: linkPreviewOptions } : {}),
       ...baseParams,
     });
     return res.message_id;
@@ -250,6 +278,7 @@ async function sendTelegramText(
       runtime.log?.(`telegram HTML parse failed; retrying without formatting: ${errText}`);
       const fallbackText = opts?.plainText ?? text;
       const res = await bot.api.sendMessage(chatId, fallbackText, {
+        ...(linkPreviewOptions ? { link_preview_options: linkPreviewOptions } : {}),
         ...baseParams,
       });
       return res.message_id;

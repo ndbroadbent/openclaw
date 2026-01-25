@@ -76,6 +76,11 @@ export type {
   GroupToolPolicyConfig,
   MarkdownConfig,
   MarkdownTableMode,
+  GoogleChatAccountConfig,
+  GoogleChatConfig,
+  GoogleChatDmConfig,
+  GoogleChatGroupConfig,
+  GoogleChatActionConfig,
   MSTeamsChannelConfig,
   MSTeamsConfig,
   MSTeamsReplyStyle,
@@ -83,6 +88,7 @@ export type {
 } from "../config/types.js";
 export {
   DiscordConfigSchema,
+  GoogleChatConfigSchema,
   IMessageConfigSchema,
   MSTeamsConfigSchema,
   SignalConfigSchema,
@@ -106,6 +112,7 @@ export type { WizardPrompter } from "../wizard/prompts.js";
 export { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../routing/session-key.js";
 export { resolveAckReaction } from "../agents/identity.js";
 export type { ReplyPayload } from "../auto-reply/types.js";
+export type { ChunkMode } from "../auto-reply/chunk.js";
 export { SILENT_REPLY_TOKEN, isSilentReplyText } from "../auto-reply/tokens.js";
 export {
   buildPendingHistoryContextFromMap,
@@ -141,12 +148,14 @@ export { resolveControlCommandGate } from "../channels/command-gating.js";
 export {
   resolveBlueBubblesGroupRequireMention,
   resolveDiscordGroupRequireMention,
+  resolveGoogleChatGroupRequireMention,
   resolveIMessageGroupRequireMention,
   resolveSlackGroupRequireMention,
   resolveTelegramGroupRequireMention,
   resolveWhatsAppGroupRequireMention,
   resolveBlueBubblesGroupToolPolicy,
   resolveDiscordGroupToolPolicy,
+  resolveGoogleChatGroupToolPolicy,
   resolveIMessageGroupToolPolicy,
   resolveSlackGroupToolPolicy,
   resolveTelegramGroupToolPolicy,
