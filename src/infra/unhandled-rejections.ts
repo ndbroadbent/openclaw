@@ -1,6 +1,7 @@
 import process from "node:process";
 
 import { extractErrorCode, formatUncaughtError } from "./errors.js";
+import { captureException } from "./sentry.js";
 
 type UnhandledRejectionHandler = (reason: unknown) => boolean;
 
@@ -135,18 +136,23 @@ export function installUnhandledRejectionHandler(): void {
     }
 
     if (isFatalError(reason)) {
+      // Report fatal errors to Sentry before exiting
+      captureException(reason, { fatal: true, errorType: "fatal" });
       console.error("[openclaw] FATAL unhandled rejection:", formatUncaughtError(reason));
       process.exit(1);
       return;
     }
 
     if (isConfigError(reason)) {
+      // Report config errors to Sentry
+      captureException(reason, { errorType: "config" });
       console.error("[openclaw] CONFIGURATION ERROR - requires fix:", formatUncaughtError(reason));
       process.exit(1);
       return;
     }
 
     if (isTransientNetworkError(reason)) {
+      // Don't report transient network errors to Sentry (they're filtered anyway)
       console.warn(
         "[openclaw] Non-fatal unhandled rejection (continuing):",
         formatUncaughtError(reason),
@@ -154,6 +160,8 @@ export function installUnhandledRejectionHandler(): void {
       return;
     }
 
+    // Report unexpected errors to Sentry
+    captureException(reason, { errorType: "unhandled_rejection" });
     console.error("[openclaw] Unhandled promise rejection:", formatUncaughtError(reason));
     process.exit(1);
   });

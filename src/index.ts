@@ -2,6 +2,10 @@
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+// Initialize Sentry early to capture all errors
+import { initSentry } from "./infra/sentry.js";
+initSentry();
+
 import { getReplyFromConfig } from "./auto-reply/reply.js";
 import { applyTemplate } from "./auto-reply/templating.js";
 import { monitorWebChannel } from "./channel-web.js";
