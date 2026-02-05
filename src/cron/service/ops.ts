@@ -39,24 +39,27 @@ export function stop(state: CronServiceState) {
 }
 
 export async function status(state: CronServiceState) {
-  return await locked(state, async () => {
-    await ensureLoaded(state);
-    return {
-      enabled: state.deps.cronEnabled,
-      storePath: state.deps.storePath,
-      jobs: state.store?.jobs.length ?? 0,
-      nextWakeAtMs: state.deps.cronEnabled === true ? (nextWakeAtMs(state) ?? null) : null,
-    };
-  });
+  // NOTE: status/list are read-only. Using locked() here means they block behind
+  // any long-running cron job execution (which holds the lock for the entire job).
+  // That makes the CLI/gateway feel "hung" (and can trigger gateway timeouts).
+  //
+  // It’s safe to avoid the lock as long as we accept a potentially slightly-stale
+  // snapshot.
+  await ensureLoaded(state);
+  return {
+    enabled: state.deps.cronEnabled,
+    storePath: state.deps.storePath,
+    jobs: state.store?.jobs.length ?? 0,
+    nextWakeAtMs: state.deps.cronEnabled === true ? (nextWakeAtMs(state) ?? null) : null,
+  };
 }
 
 export async function list(state: CronServiceState, opts?: { includeDisabled?: boolean }) {
-  return await locked(state, async () => {
-    await ensureLoaded(state);
-    const includeDisabled = opts?.includeDisabled === true;
-    const jobs = (state.store?.jobs ?? []).filter((j) => includeDisabled || j.enabled);
-    return jobs.sort((a, b) => (a.state.nextRunAtMs ?? 0) - (b.state.nextRunAtMs ?? 0));
-  });
+  // See note in status() about avoiding lock contention for read-only ops.
+  await ensureLoaded(state);
+  const includeDisabled = opts?.includeDisabled === true;
+  const jobs = (state.store?.jobs ?? []).filter((j) => includeDisabled || j.enabled);
+  return jobs.sort((a, b) => (a.state.nextRunAtMs ?? 0) - (b.state.nextRunAtMs ?? 0));
 }
 
 export async function add(state: CronServiceState, input: CronJobCreate) {
