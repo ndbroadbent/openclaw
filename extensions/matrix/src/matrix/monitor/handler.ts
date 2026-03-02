@@ -17,13 +17,19 @@ import {
 } from "openclaw/plugin-sdk/matrix";
 import type { CoreConfig, MatrixRoomConfig, ReplyToMode } from "../../types.js";
 import { fetchEventSummary } from "../actions/summary.js";
+import { createMatrixDraftStream } from "../draft-stream.js";
 import {
   formatPollAsText,
   isPollStartType,
   parsePollStartContent,
   type PollStartContent,
 } from "../poll-types.js";
-import { reactMatrixMessage, sendMessageMatrix, sendTypingMatrix } from "../send.js";
+import {
+  editMessageMatrix,
+  reactMatrixMessage,
+  sendMessageMatrix,
+  sendTypingMatrix,
+} from "../send.js";
 import { enforceMatrixDirectMessageAccess, resolveMatrixAccessState } from "./access-policy.js";
 import {
   normalizeMatrixAllowList,
@@ -709,12 +715,56 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           });
         },
       });
+      const matrixCfg = cfg.channels?.matrix;
+      const streamingEnabled = matrixCfg?.streaming === "partial";
+      const streamThrottleMs = matrixCfg?.streamThrottleMs ?? 800;
+      const draftStream = streamingEnabled
+        ? createMatrixDraftStream({
+            roomId,
+            accountId: route.accountId ?? undefined,
+            threadId: threadTarget ?? null,
+            throttleMs: streamThrottleMs,
+            log: logVerboseMessage,
+            warn: logVerboseMessage,
+          })
+        : null;
+      let draftFinalized = false;
+
       const { dispatcher, replyOptions, markDispatchIdle } =
         core.channel.reply.createReplyDispatcherWithTyping({
           ...prefixOptions,
           humanDelay,
           typingCallbacks,
           deliver: async (payload) => {
+            const finalText = typeof payload.text === "string" ? payload.text.trim() : "";
+            const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
+            const streamEventId = draftStream?.getEventId();
+            // Finalize the draft stream in-place: edit the existing message to the
+            // final text (no cursor) instead of sending a duplicate new message.
+            if (
+              draftStream &&
+              finalText &&
+              !hasMedia &&
+              !payload.isError &&
+              streamEventId &&
+              !draftFinalized
+            ) {
+              await draftStream.stop();
+              try {
+                await editMessageMatrix(roomId, streamEventId, finalText, {
+                  client,
+                  accountId: route.accountId ?? undefined,
+                });
+                draftFinalized = true;
+                draftStream.forceNewMessage();
+                didSendReply = true;
+                return;
+              } catch (err) {
+                logVerboseMessage(
+                  `matrix: draft finalize edit failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+            }
             await deliverMatrixReplies({
               replies: [payload],
               roomId,
@@ -740,12 +790,26 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         onSettled: () => {
           markDispatchIdle();
         },
-        replyOptions: {
-          ...replyOptions,
-          skillFilter: roomConfig?.skills,
-          onModelSelected,
-        },
+        run: () =>
+          core.channel.reply.dispatchReplyFromConfig({
+            ctx: ctxPayload,
+            cfg,
+            dispatcher,
+            replyOptions: {
+              ...replyOptions,
+              skillFilter: roomConfig?.skills,
+              onModelSelected,
+              onPartialReply: draftStream
+                ? (payload: { text?: string }) => {
+                    if (payload.text) draftStream.update(payload.text);
+                  }
+                : undefined,
+            },
+          }),
       });
+      if (draftStream && !draftFinalized) {
+        await draftStream.finalize();
+      }
       if (!queuedFinal) {
         return;
       }
