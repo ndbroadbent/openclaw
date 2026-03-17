@@ -23,6 +23,10 @@ function credentialsFilename(accountId?: string | null): string {
   return `credentials-${normalized}.json`;
 }
 
+function legacyCredentialsPath(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(resolveMatrixCredentialsDir(env), "credentials.json");
+}
+
 export function resolveMatrixCredentialsDir(
   env: NodeJS.ProcessEnv = process.env,
   stateDir?: string,
@@ -45,10 +49,21 @@ export function loadMatrixCredentials(
 ): MatrixStoredCredentials | null {
   const credPath = resolveMatrixCredentialsPath(env, accountId);
   try {
-    if (!fs.existsSync(credPath)) {
-      return null;
+    let pathToRead = credPath;
+    if (!fs.existsSync(pathToRead)) {
+      const normalized = normalizeAccountId(accountId);
+      if (normalized !== DEFAULT_ACCOUNT_ID) {
+        const legacyPath = legacyCredentialsPath(env);
+        if (fs.existsSync(legacyPath)) {
+          pathToRead = legacyPath;
+        } else {
+          return null;
+        }
+      } else {
+        return null;
+      }
     }
-    const raw = fs.readFileSync(credPath, "utf-8");
+    const raw = fs.readFileSync(pathToRead, "utf-8");
     const parsed = JSON.parse(raw) as Partial<MatrixStoredCredentials>;
     if (
       typeof parsed.homeserver !== "string" ||
@@ -103,10 +118,15 @@ export function clearMatrixCredentials(
   env: NodeJS.ProcessEnv = process.env,
   accountId?: string | null,
 ): void {
-  const credPath = resolveMatrixCredentialsPath(env, accountId);
+  const paths = [resolveMatrixCredentialsPath(env, accountId)];
+  if (normalizeAccountId(accountId) !== DEFAULT_ACCOUNT_ID) {
+    paths.push(legacyCredentialsPath(env));
+  }
   try {
-    if (fs.existsSync(credPath)) {
-      fs.unlinkSync(credPath);
+    for (const credPath of paths) {
+      if (fs.existsSync(credPath)) {
+        fs.unlinkSync(credPath);
+      }
     }
   } catch {
     // ignore

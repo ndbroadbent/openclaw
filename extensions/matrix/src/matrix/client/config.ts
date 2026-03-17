@@ -100,6 +100,30 @@ export function resolveMatrixConfig(
   return resolveMatrixConfigForAccount(cfg, DEFAULT_ACCOUNT_ID, env);
 }
 
+function buildTrustedHomeserverPolicy(homeserver: string): {
+  allowPrivateNetwork: true;
+  allowedHostnames?: string[];
+} {
+  try {
+    const hostname = new URL(homeserver).hostname;
+    return hostname
+      ? { allowPrivateNetwork: true, allowedHostnames: [hostname] }
+      : { allowPrivateNetwork: true };
+  } catch {
+    return { allowPrivateNetwork: true };
+  }
+}
+
+function isUnknownTokenErrorPayload(payload: unknown): boolean {
+  if (payload instanceof Error) {
+    return payload.message.includes("M_UNKNOWN_TOKEN");
+  }
+  if (typeof payload === "string") {
+    return payload.includes("M_UNKNOWN_TOKEN");
+  }
+  return false;
+}
+
 export async function resolveMatrixAuth(params?: {
   cfg?: CoreConfig;
   env?: NodeJS.ProcessEnv;
@@ -113,6 +137,7 @@ export async function resolveMatrixAuth(params?: {
   }
 
   const {
+    clearMatrixCredentials,
     loadMatrixCredentials,
     saveMatrixCredentials,
     credentialsMatchConfig,
@@ -164,15 +189,40 @@ export async function resolveMatrixAuth(params?: {
   }
 
   if (cachedCredentials) {
-    touchMatrixCredentials(env, accountId);
-    return {
-      homeserver: cachedCredentials.homeserver,
-      userId: cachedCredentials.userId,
-      accessToken: cachedCredentials.accessToken,
-      deviceName: resolved.deviceName,
-      initialSyncLimit: resolved.initialSyncLimit,
-      encryption: resolved.encryption,
-    };
+    const { response: whoamiResponse, release: releaseWhoamiResponse } = await fetchWithSsrFGuard({
+      url: `${cachedCredentials.homeserver}/_matrix/client/v3/account/whoami`,
+      init: {
+        method: "GET",
+        headers: { Authorization: `Bearer ${cachedCredentials.accessToken}` },
+      },
+      policy: buildTrustedHomeserverPolicy(cachedCredentials.homeserver),
+      auditContext: "matrix.whoami",
+    });
+    try {
+      if (!whoamiResponse.ok) {
+        const errorText = await whoamiResponse.text();
+        if (isUnknownTokenErrorPayload(errorText)) {
+          clearMatrixCredentials(env, accountId);
+        }
+        throw new Error(`Matrix whoami failed: ${errorText}`);
+      }
+      const whoami = (await whoamiResponse.json()) as { user_id?: string };
+      touchMatrixCredentials(env, accountId);
+      return {
+        homeserver: cachedCredentials.homeserver,
+        userId: whoami.user_id ?? cachedCredentials.userId,
+        accessToken: cachedCredentials.accessToken,
+        deviceName: resolved.deviceName,
+        initialSyncLimit: resolved.initialSyncLimit,
+        encryption: resolved.encryption,
+      };
+    } catch (err) {
+      if (!isUnknownTokenErrorPayload(err)) {
+        throw err;
+      }
+    } finally {
+      await releaseWhoamiResponse();
+    }
   }
 
   if (!resolved.userId) {
@@ -198,6 +248,7 @@ export async function resolveMatrixAuth(params?: {
         initial_device_display_name: resolved.deviceName ?? "OpenClaw Gateway",
       }),
     },
+    policy: buildTrustedHomeserverPolicy(resolved.homeserver),
     auditContext: "matrix.login",
   });
   const login = await (async () => {
