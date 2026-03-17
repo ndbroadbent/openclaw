@@ -10,6 +10,10 @@ let matrixSdkBaseLogger:
       error: (module: string, ...messageOrObject: unknown[]) => void;
     }
   | undefined;
+let matrixUnknownTokenRestartScheduled = false;
+let exitProcess: (code: number) => void = (code) => {
+  process.exit(code);
+};
 
 function shouldSuppressMatrixHttpNotFound(module: string, messageOrObject: unknown[]): boolean {
   if (module !== "MatrixHttpClient") {
@@ -21,6 +25,30 @@ function shouldSuppressMatrixHttpNotFound(module: string, messageOrObject: unkno
     }
     return (entry as { errcode?: string }).errcode === "M_NOT_FOUND";
   });
+}
+
+function isMatrixUnknownToken(module: string, messageOrObject: unknown[]): boolean {
+  if (module !== "MatrixHttpClient") {
+    return false;
+  }
+  return messageOrObject.some((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return false;
+    }
+    return (entry as { errcode?: string }).errcode === "M_UNKNOWN_TOKEN";
+  });
+}
+
+function scheduleRestartForUnknownToken(): void {
+  if (matrixUnknownTokenRestartScheduled) {
+    return;
+  }
+  matrixUnknownTokenRestartScheduled = true;
+  matrixSdkBaseLogger?.error(
+    "MatrixClientLite",
+    "Matrix access token became invalid during runtime; exiting so startup can re-auth cleanly",
+  );
+  setTimeout(() => exitProcess(75), 0);
 }
 
 export function ensureMatrixSdkLoggingConfigured(): void {
@@ -40,7 +68,23 @@ export function ensureMatrixSdkLoggingConfigured(): void {
       if (shouldSuppressMatrixHttpNotFound(module, messageOrObject)) {
         return;
       }
+      if (isMatrixUnknownToken(module, messageOrObject)) {
+        scheduleRestartForUnknownToken();
+      }
       matrixSdkBaseLogger?.error(module, ...messageOrObject);
     },
   });
+}
+
+export function __setMatrixUnknownTokenExitForTests(fn: (code: number) => void): void {
+  exitProcess = fn;
+}
+
+export function __resetMatrixSdkLoggingForTests(): void {
+  matrixSdkLoggingConfigured = false;
+  matrixSdkBaseLogger = undefined;
+  matrixUnknownTokenRestartScheduled = false;
+  exitProcess = (code) => {
+    process.exit(code);
+  };
 }
